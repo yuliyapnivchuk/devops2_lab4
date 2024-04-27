@@ -1,3 +1,5 @@
 image_tag = "2.60.2"
-account_id = "000000"
+account_id = "005362471327"
 region = "us-east-1"
+dns_hosted_zone_id = "Z0195705SKP1BRPCP7RP"
+dns_service_name = "lab4.pnivch.pp.ua"

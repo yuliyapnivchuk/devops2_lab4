@@ -12,3 +12,13 @@ variable "region" {
   description = "The AWS region"
   type        = string
 }
+
+variable "dns_hosted_zone_id" {
+  description = "The DNS hosted zone id"
+  type        = string
+}
+
+variable "dns_service_name" {
+  description = "The DNS service name"
+  type        = string
+}

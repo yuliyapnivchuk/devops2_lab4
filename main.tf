@@ -3,6 +3,16 @@ resource "aws_vpc" "vpc" {
   instance_tenancy = "default"
 }
 
+resource "aws_internet_gateway" "lab4_igw" {
+  vpc_id = aws_vpc.vpc.id
+}
+
+resource "aws_route" "route_to_igw" {
+  route_table_id         = aws_vpc.vpc.default_route_table_id
+  destination_cidr_block = "0.0.0.0/0"
+  gateway_id             = aws_internet_gateway.lab4_igw.id
+}
+
 resource "aws_security_group" "lab4_jenk_sg" {
   name        = "lab4-jenkins-security-group"
   description = "Security group for lab4"
@@ -34,7 +44,7 @@ resource "aws_security_group_rule" "all_traffic_inbound" {
 resource "aws_subnet" "subnet_1" {
   vpc_id            = aws_vpc.vpc.id
   cidr_block        = "10.0.0.0/24"
-  availability_zone = "us-east-1a"
+  availability_zone = "us-east-1d"
   #   availability_zone       = data.aws_availability_zones.available.names[0]
   map_public_ip_on_launch = true
 }
@@ -117,7 +127,7 @@ resource "aws_ecs_task_definition" "lab4_task" {
 
   container_definitions = jsonencode([
     {
-      name      = "lab4-container"
+      name      = "lab4-jenkins-container"
       image     = "${aws_ecr_repository.lab4_ecr.repository_url}:latest"
       cpu       = 256
       memory    = 512
@@ -133,19 +143,45 @@ resource "aws_ecs_task_definition" "lab4_task" {
 }
 
 resource "aws_ecs_service" "jenkins_service" {
-  name            = "jenkins-service"
-  cluster         = aws_ecs_cluster.lab4_ecs_cluster.id
-  task_definition = aws_ecs_task_definition.lab4_task.arn
-  desired_count   = 1
-  launch_type     = "FARGATE"
+  name                    = "jenkins-service"
+  cluster                 = aws_ecs_cluster.lab4_ecs_cluster.id
+  task_definition         = aws_ecs_task_definition.lab4_task.arn
+  desired_count           = 1
+  launch_type             = "FARGATE"
+  enable_ecs_managed_tags = true
+  wait_for_steady_state   = true #important!!! to get public ip later for DNS record
 
   network_configuration {
-    # subnets          = ["subnet-0b9a7149cd40fdd8c"]
     subnets          = [aws_subnet.subnet_1.id]
     security_groups  = [aws_security_group.lab4_jenk_sg.id]
-    # security_groups  = ["sg-016678241ab1f323d"]
     assign_public_ip = true
   }
 
-  depends_on = [null_resource.build_and_push_image]
+  depends_on = [null_resource.build_and_push_image, aws_iam_role_policy_attachment.task_execution_policy_attachment]
+}
+
+data "aws_network_interfaces" "service_network_interface" {
+  depends_on = [aws_ecs_service.jenkins_service]
+  tags = {
+    "aws:ecs:serviceName" = aws_ecs_service.jenkins_service.name
+  }
+}
+
+data "aws_network_interface" "eni-ip" {
+  depends_on = [aws_ecs_service.jenkins_service]
+  id         = data.aws_network_interfaces.service_network_interface.ids[0]
+}
+
+resource "aws_route53_record" "ecs_task_dns" {
+  zone_id = var.dns_hosted_zone_id
+  name    = var.dns_service_name
+  type    = "A"
+  ttl     = 300
+  records = [data.aws_network_interface.eni-ip.association[0].public_ip]
+}
+
+output "service-url" {
+  value       = "http://${var.dns_service_name}:8080"
+  sensitive   = false
+  description = "Jenkins is running here: "
 }
